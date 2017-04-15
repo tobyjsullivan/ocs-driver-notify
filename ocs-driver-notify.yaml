@@ -1,0 +1,36 @@
+apiVersion: apps/v1beta1
+kind: Deployment
+metadata:
+  name: ocs-driver-notify
+spec:
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: ocs-driver-notify
+    spec:
+      containers:
+      - name: ocs-driver-notify
+        image: tobyjsullivan/ocs-driver-notify:latest
+        env:
+        - name: AWS_REGION
+          value: "us-west-2"
+        - name: AWS_ACCESS_KEY_ID
+          value: "AKIAJFJCFWNMANSML22Q"
+        - name: AWS_SECRET_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: ocs-prod-svc-driver-notify
+              key: AWS_SECRET_ACCESS_KEY
+        - name: TWILIO_ACCOUNT_SID
+          value: "AC836e017add54a9ad692103cb04022af0"
+        - name: TWILIO_AUTH_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: ocs-prod-svc-driver-notify
+              key: TWILIO_AUTH_TOKEN
+        - name: SERVICE_PHONE
+          value: "+16042657199"
+        - name: DRIVER_PHONE_NUMBER
+          value: "+17786881639"
+
