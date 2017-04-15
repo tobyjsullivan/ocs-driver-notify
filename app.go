@@ -4,24 +4,38 @@ import (
     "github.com/aws/aws-sdk-go/aws/session"
     "github.com/aws/aws-sdk-go/service/sqs"
     "github.com/aws/aws-sdk-go/aws"
+    "github.com/sfreiberg/gotwilio"
     "encoding/json"
     "fmt"
     _ "github.com/joho/godotenv/autoload"
+    "os"
+    "errors"
+    "net/url"
 )
 
 var queueUrl = "https://sqs.us-west-2.amazonaws.com/110303772622/ocs-order-accepted-driver-notifations"
 var sqsClient *sqs.SQS
+var twilioClient *gotwilio.Twilio
+var servicePhone string
+var driverPhone string
 
 func init() {
     awsSession := session.Must(session.NewSession())
     sqsClient = sqs.New(awsSession)
+
+    accountSid := os.Getenv("TWILIO_ACCOUNT_SID")
+    authToken := os.Getenv("TWILIO_AUTH_TOKEN")
+    twilioClient = gotwilio.NewTwilioClient(accountSid, authToken)
+
+    servicePhone = os.Getenv("SERVICE_PHONE")
+    driverPhone = os.Getenv("DRIVER_PHONE_NUMBER")
 }
 
 func main() {
     println("Started.")
     receiveInput := &sqs.ReceiveMessageInput{
         QueueUrl: aws.String(queueUrl),
-        MaxNumberOfMessages: aws.Int64(1),
+        MaxNumberOfMessages: aws.Int64(10),
     }
 
     for (true) {
@@ -32,7 +46,7 @@ func main() {
         }
 
         for _, msg := range result.Messages {
-            handleMessage(msg)
+            go handleMessage(msg)
         }
 
     }
@@ -51,11 +65,46 @@ func handleMessage(msg *sqs.Message) error {
         return err
     }
 
-    println(fmt.Sprintf("%v", order))
+    err = sendDriverSMS(order)
+    if err != nil {
+        return err
+    }
+
+    println(fmt.Sprintf("SMS sent to driver for Order %s", order.ID))
 
     deleteMessage(msg)
 
     return nil
+}
+
+func sendDriverSMS(order *order) error {
+    content := fmt.Sprintf("New Order!\n%s (%s)\n%s\n%s\n%s\n\n%s\n\n%s", order.Name, order.Phone, order.Address1,
+        order.Address2, order.PostalCode, order.AdditionalInstructions, wazeUrl(order))
+
+    resp, exception, err := twilioClient.SendSMS(servicePhone, driverPhone, content, "", "")
+    if err != nil {
+        return err
+    }
+
+    if exception != nil {
+        return errors.New(fmt.Sprintf("Twilio Exception: %s (Code: %d)", exception.Message, exception.Code))
+    }
+
+    println(fmt.Sprintf("Sent Twilio message %s", resp.Sid))
+
+    return nil
+}
+
+func wazeUrl(order *order) string {
+    wazeQuery := &url.Values{}
+    wazeQuery.Set("q", order.Address1)
+    wazeUrl := &url.URL{
+        Scheme: "waze",
+        ForceQuery: true,
+        RawQuery: wazeQuery.Encode(),
+    }
+
+    return wazeUrl.String()
 }
 
 func deleteMessage(msg *sqs.Message) error {
@@ -85,7 +134,7 @@ func parseSNSMessage(msgBody *string) (*snsMessage, error) {
 type order struct {
     ID                     string `json:"id"`
     Name                   string `json:"name"`
-    Phone                  string `json:"string"`
+    Phone                  string `json:"phone"`
     Address1               string `json:"address1"`
     Address2               string `json:"address2"`
     PostalCode             string `json:"postalCode"`
